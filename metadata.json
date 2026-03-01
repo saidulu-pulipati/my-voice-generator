@@ -1,0 +1,5 @@
+{
+  "name": "my voice generator",
+  "description": "A robust multi-lingual Text-to-Speech application supporting English and Telugu with natural voice control.",
+  "requestFramePermissions": []
+}
