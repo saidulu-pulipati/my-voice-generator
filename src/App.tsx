@@ -29,6 +29,15 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+declare global {
+  interface Window {
+    aistudio: {
+      hasSelectedApiKey: () => Promise<boolean>;
+      openSelectKey: () => Promise<void>;
+    };
+  }
+}
+
 // --- Constants ---
 const MAX_TOKENS = 8192;
 const LANGUAGES = [
@@ -70,7 +79,22 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [volume, setVolume] = useState(1);
+  const [hasApiKey, setHasApiKey] = useState<boolean>(true);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    const checkApiKey = async () => {
+      if (window.aistudio) {
+        const hasKey = await window.aistudio.hasSelectedApiKey();
+        // If we have an environment key, we're good even if hasSelectedApiKey is false
+        setHasApiKey(hasKey || !!process.env.GEMINI_API_KEY || !!process.env.API_KEY);
+      } else {
+        // In local dev, we assume the key is in the env
+        setHasApiKey(!!process.env.GEMINI_API_KEY || !!process.env.API_KEY);
+      }
+    };
+    checkApiKey();
+  }, []);
 
   useEffect(() => {
     if (audioRef.current) {
@@ -95,12 +119,26 @@ export default function App() {
       return;
     }
 
+    if (!hasApiKey && window.aistudio) {
+      try {
+        await window.aistudio.openSelectKey();
+        setHasApiKey(true);
+      } catch (err) {
+        setError('API Key selection is required to use this service.');
+        return;
+      }
+    }
+
     setIsGenerating(true);
     setError(null);
     setAudioUrl(null);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        throw new Error('API Key is missing. Please select an API key to continue.');
+      }
+      const ai = new GoogleGenAI({ apiKey });
       const model = "gemini-2.5-flash-preview-tts";
 
       // Construct the prompt with natural language instructions for voice
@@ -157,7 +195,14 @@ Text to speak: "${text}"`;
       }
     } catch (err: any) {
       console.error('TTS Error:', err);
-      setError(err.message || 'Failed to generate audio. Please try again.');
+      if (err.message?.includes('Requested entity was not found') || err.message?.includes('API_KEY')) {
+        setError('API Key issue detected. Please re-select your API key.');
+        if (window.aistudio) {
+          setHasApiKey(false);
+        }
+      } else {
+        setError(err.message || 'Failed to generate audio. Please try again.');
+      }
     } finally {
       setIsGenerating(false);
     }
@@ -270,6 +315,27 @@ Text to speak: "${text}"`;
       </header>
 
       <main className="max-w-5xl mx-auto px-6 py-10">
+        {!hasApiKey && (
+          <motion.div 
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-8 p-4 bg-amber-50 border border-amber-200 rounded-2xl flex items-center justify-between gap-4 shadow-sm"
+          >
+            <div className="flex items-center gap-3 text-amber-800 text-sm">
+              <AlertCircle className="w-5 h-5 shrink-0 text-amber-500" />
+              <p>
+                <span className="font-semibold">API Key Required:</span> To use the high-quality TTS model in deployment, please select a paid Google Cloud project API key.
+              </p>
+            </div>
+            <button 
+              onClick={() => window.aistudio?.openSelectKey().then(() => setHasApiKey(true))}
+              className="px-4 py-2 bg-amber-600 text-white text-xs font-bold uppercase tracking-widest rounded-xl hover:bg-amber-700 transition-colors shadow-sm"
+            >
+              Select Key
+            </button>
+          </motion.div>
+        )}
+
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
           
           {/* Left Column: Controls */}
